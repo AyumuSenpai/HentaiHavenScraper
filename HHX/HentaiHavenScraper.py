@@ -1,17 +1,21 @@
+from typing import List, Dict, Any
+
 import requests
 from bs4 import BeautifulSoup
-import json
+import re
 
 
 class FailedToReachHentaiHaven(Exception):
     pass
 
+class FailedToFindSummary(Exception):
+    pass
 
 class HHX:
     def __init__(self):
         self.baseURL = "https://hentaihaven.xxx/"
 
-    def Search(self, name: str) -> str:
+    def Search(self, name: str = "") -> list[dict[str, str]]:
         titles = []
         studios = []
         covers = []
@@ -113,4 +117,59 @@ class HHX:
             parsedResult[i]["release"] = releaseDates[i]
             parsedResult[i]["episodes"] = episodes[i]
 
-        return json.dumps(parsedResult)
+        return parsedResult
+
+    def Info(self, name: str) -> dict[str, str | list[str] | Any]:
+        filteredName = name.lower().replace(" ", "-")
+        searchURL = self.baseURL + "watch/" + filteredName
+
+        try:
+            data = requests.get(searchURL).content
+            parsedData = BeautifulSoup(data, "html.parser")
+        except FailedToReachHentaiHaven:
+            parsedData = ""
+
+        #Grabs Title
+        title = parsedData.find("div", class_="post-title")
+        tagsToRemove = re.compile('<.*?>')
+        title = tagsToRemove.sub("", str(title)).strip()
+        # Grabs Cover URL
+        tempCover = str(parsedData.find("div", class_="position-relative"))
+        coverIndex = (tempCover.find('src="') + 5)
+        cover = ""
+        while tempCover[coverIndex] != ' ' and '"':
+            cover = cover + tempCover[coverIndex]
+            coverIndex = coverIndex + 1
+        cover = cover[:-1]
+        #Grabs Summary
+        try:
+            summary = parsedData.find("div", class_="description-summary").find_all("p")
+            summary = tagsToRemove.sub("", str(summary)).replace("[", "").replace("]", "").strip()
+        except FailedToFindSummary:
+            summary = ""
+        #Grabs Studio
+        studio = parsedData.find("div", class_="author-content")
+        studio = tagsToRemove.sub("", str(studio)).strip()
+        #Grabs Release
+        release = parsedData.find(
+            "div", class_="post-status").find("div", class_="post-content_item").find("div", class_="summary-content")
+        release = tagsToRemove.sub("", str(release)).strip()
+        # Grabs Genres in a list of strings
+        genres = []
+        tempGenres = parsedData.find("div", class_="genres-content").find_all("a")
+        for genre in tempGenres:
+            temp = tagsToRemove.sub("", str(genre)).strip()
+            genres.append(temp)
+        # Grabs latest episode number
+        episodes = parsedData.find("li", "wp-manga-chapter").find("a")
+        episodes = tagsToRemove.sub("", str(episodes)).replace("Episode", "").strip()
+
+        result = {
+            "title": title,
+            "cover": cover,
+            "studio": studio,
+            "release": release,
+            "episodes": episodes,
+            "genres": genres
+        }
+        return result
